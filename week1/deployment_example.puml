@@ -1,0 +1,134 @@
+@startuml
+
+header TA项目物理架构图
+footer TA项目物理架构图
+
+left to right direction
+
+
+
+
+actor TaUser as taUser
+node TaApp as taApp {
+    agent LxSDK as lxsdk
+    agent TaClient as taClient
+}
+
+folder tiananuser_folder{
+cloud tiananuserCluster
+node tomcat1_tiananuser
+node tomcat2_tiananuser
+node tomcat3_tiananuser
+
+tiananuserCluster -down-> tomcat1_tiananuser
+tiananuserCluster -down-> tomcat2_tiananuser
+tiananuserCluster -down-> tomcat3_tiananuser
+
+
+
+}
+
+folder tianansp_folder{
+cloud tiananspCluster
+node tomcat1_tianansp
+node tomcat2_tianansp
+node tomcat3_tianansp
+
+tiananspCluster -down-> tomcat1_tianansp
+tiananspCluster -down-> tomcat2_tianansp
+tiananspCluster -down-> tomcat3_tianansp
+
+}
+
+
+node Nginx as nginx
+
+nginx --> tiananuserCluster:负载均衡/路由
+nginx --> tiananspCluster:负载均衡/路由
+
+
+taUser -->  taApp : 访问
+taApp --> nginx:http/https
+
+
+database tiananuser_database[
+    用户登录数据库
+
+]
+database tianansp_database[
+    运营活动数据库
+]
+
+database redis[
+    redis缓存
+]
+
+
+tiananuser_folder -down-> tiananuser_database
+tianansp_folder -right-> tianansp_database
+
+tiananuser_folder -down-> redis
+tianansp_folder -up-> redis
+
+
+node zk [
+    zookeeper注册中心
+    dubbo的消费者跟生产者通信中间件
+    定时任务elasticjob的配置中间件
+]
+
+
+tiananuser_folder -down-> zk
+tianansp_folder -up-> zk
+
+
+node apollo [
+    apollo配置中心
+]
+
+queue kafka[
+    kafka集群
+]
+
+
+tiananuser_folder -down-> apollo
+tianansp_folder -up-> apollo
+
+
+tiananuser_folder -down-> kafka
+tianansp_folder -up-> kafka
+
+
+file fileCDN [
+    七牛云或者阿里云存储
+]
+
+
+tiananuser_folder -down-> fileCDN
+tianansp_folder -up-> fileCDN
+
+
+cloud ELK {
+    node elsticSearch
+    node filebeat
+    node kibana
+}
+
+node kubernetes{
+    node healmcharts[
+       交付服务
+    ]
+    node harbor[
+        harbor监控管理kubernetes对象
+    ]
+}
+
+
+tiananuser_folder -down-> ELK:日志写入
+tianansp_folder -up-> ELK:日志写入
+
+
+tiananuser_folder -down-> kubernetes:发布和管控docker节点
+tianansp_folder -up-> kubernetes:发布和管控docker节点
+
+@enduml

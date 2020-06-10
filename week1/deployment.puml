@@ -1,0 +1,42 @@
+@startuml
+
+header 物理架构图
+footer 物理架构图
+
+left to right direction
+
+
+
+
+card 卡片1
+card 卡片2
+card 卡片n
+node 收款机1 {
+
+}
+node 收款机N {
+
+}
+
+卡片1 --> 收款机1 : NFC
+卡片2 --> 收款机1
+卡片n --> 收款机1
+
+卡片1 --> 收款机N : NFC
+卡片2 --> 收款机N
+卡片n --> 收款机N
+
+node 管理中心 {
+    component 金额管理
+    component 卡片管理
+    component 消费日志
+}
+
+收款机1 --> 管理中心 : http or https
+收款机N --> 管理中心 : http or https
+
+database 数据库
+
+管理中心 ----> 数据库
+
+@enduml
