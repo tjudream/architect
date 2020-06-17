@@ -1,0 +1,14 @@
+@startuml
+header Dependency inversion pattern
+class Controller
+interface Service
+class ServiceImpl
+interface Dao
+class DaoImpl
+
+Controller .> Service
+Service <|.. ServiceImpl
+ServiceImpl .> Dao
+Dao <|.. DaoImpl
+
+@enduml

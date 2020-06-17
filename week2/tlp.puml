@@ -1,0 +1,10 @@
+@startuml
+header Traditional layers pattern
+class Controller
+class Service
+class Dao
+
+Controller .> Service
+Service .> Dao
+
+@enduml
