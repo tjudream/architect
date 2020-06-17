@@ -1,0 +1,28 @@
+@startuml
+header interface-segregation principle (ISP)
+interface Cache {
+    Object get(Object key);
+    void put(Object key, Object value);
+    void delete(Object key);
+}
+interface Manager {
+    void reBuild(Config config);
+}
+
+interface CacheManager
+
+class CacheImpl
+class CacheManagerImpl
+
+Cache <|-- CacheImpl
+Cache <|-- CacheManager
+Manager <|-- CacheManager
+CacheManager <|-- CacheManagerImpl
+
+class client
+class server
+
+client --> Cache
+server ---> CacheManager
+
+@enduml

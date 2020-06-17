@@ -51,3 +51,32 @@ delete 暴露给应用程序，一个接口包含 rebuild 暴露给系统远程�
 应用程序看不到 rebuild 方法。
 ```
 
+接口隔离原则：
+
+英文解释： 
+
+interface-segregation principle (ISP) states that no client should be forced to depend on methods it does not use.
+
+翻译：
+
+客户端不应该依赖它不使用的方法。
+
+这里应用程序不应该依赖 reBuild 方法，所以需要设计两个接口将 reBuild 单独拿出来，Cache 接口包括
+get、put、delete 方法，CacheManager 接口包括 reBuild 方法。
+
+CacheImpl 实现 Cache 接口，CacheManagerImpl 实现 Cache 和 CacheManager 接口。
+
+client 依赖于 Cache 接口，server 依赖于 CacheManagerImpl
+
+根据依赖倒置原则，server 不应该依赖于 CacheManagerImpl 这个具体实现，应该依赖于抽象
+
+所以重新设计：
+* Cache 接口包含 get、put、delete 方法
+* Manager 接口包含 reBuild 方法
+* CacheManager 接口继承 Cache 和 Manager 接口
+* CacheImpl 实现 Cache 接口
+* CacheManagerImpl 实现 CacheManager 接口
+
+类图：
+
+![Cache](Cache.png)
