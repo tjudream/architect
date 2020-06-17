@@ -1,0 +1,12 @@
+@startuml
+header 作业三
+
+class Cache {
+Object get(Object key)
+void put(Object key, Object value)
+void delete(Object key)
+void reBuild(Config conf)
+}
+
+
+@enduml
