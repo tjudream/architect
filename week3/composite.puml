@@ -1,0 +1,21 @@
+@startuml
+
+abstract class Component <<抽象构件>> {
+    - String name
+    + Component(String name)
+    + void add(Component component)
+    + void remove(Component component)
+    + void display()
+    + String getName()
+    + void setName(String name)
+}
+class Composite <<枝干构件>> {
+    - List<Component> chlidren
+}
+class Leaf <<叶子构件>>
+
+Component <|-- Composite
+Component <--o Composite
+Component <|-- Leaf
+Client -> Component
+@enduml
