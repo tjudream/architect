@@ -12,3 +12,6 @@
 * week4
     * [作业](week4/HomeWork.md)
     * [总结](week4/summary.md)
+* week5
+    * [作业](week5/HomeWork.md)
+    * [总结](week5/summary.md)
