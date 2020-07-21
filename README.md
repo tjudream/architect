@@ -18,3 +18,6 @@
 * week6
     * [作业](week6/HomeWork.md)
     * [总结](week6/summary.md)
+* week7
+    * [作业](week7/HomeWork.md)
+    * [总结](week7/summary.md)
