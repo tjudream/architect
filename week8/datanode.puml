@@ -1,0 +1,11 @@
+@startuml
+NameNode <- DataNode1: 注册到 NameNode
+DataNode1 -> NameNode: 定时向 NameNode 发送心跳信息
+NameNode -> NameNode: 超过一定的时间未收到 DataNode1 发送的心跳，判断 DataNode1 已下线
+NameNode -> NameNode: 从元信息中获取 DataNode1 上存储的数据块，找到这个数据块副本所的机器，并给它们发送通知
+NameNode -> DataNodeX: DataNodeX 上存储了 DataNode1 上数据块的副本，NameNode 通知 DataNodeX 将该数据发送到 DataNodeY 上
+DataNodeX -> DataNodeY: DataNodeX 发送数据块到 DataNodeY 上
+DataNodeY --> DataNodeX: 成功接收
+DataNodeX --> NameNode: 成功发送
+NameNode -> NameNode: 更新元数据信息
+@enduml
