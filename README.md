@@ -24,3 +24,6 @@
 * week8
     * [作业](week8/HomeWork.md)
     * [总结](week8/summary.md)
+* week9
+    * [作业](week9/HomeWork.md)
+    * [总结](week9/summary.md)
