@@ -157,29 +157,673 @@ NoSQL 系统处理的主要也是大规模海量数据的存储与访问，所�
 
 ### HDFS 设计目标
 
+HDFS 以流式数据访问模式存储超大文件，运行于商用硬件集群上。
+
+超大文件
+
+流式数据访问
+
+* 一次写入多次读取
+
+商用硬件
+
+### 不适合 HDFS 的场景
+
+低延迟的数据访问
+
+大量小文件
+
+* 超过 NameNode 的处理能力
+
+多用户随机写入修改文件
+
+HDFS 为了做到可靠性（reliability）创建了多份数据块（data blocks）的复制（replicas），并将它们放置在服务器集群的计算节点中（compute nodes），MapReduce 就可以在它们所在的节点上处理这些数据了。
+
+![hdfsrel](hdfsrel.png)
 
 
 
+### 设计目标
+
+假设：节点失效是常态
+
+理想：
+
+1. 任何一个节点失效，不影响 HDFS 服务
+2. HDFS 可以自动完成副本的复制
+
+### 文件
+
+文件切分成块（默认大小 64M），以块为单位，每个块有多个副本存储在不同的机器上，副本数可在文件生成时指定（默认 3）
+
+NameNode 是主节点，存储文件的元数据如文件名，文件目录结构，文件属性（生成时间，副本数，文件权限），以及每个文件的块列表以及块所在的 DataNode 等等
+
+DataNode 在本地文件系统存储文件块数据，以及块数据的校验和
+
+可以创建、删除、移动或重命名文件，当文件创建、写入和关闭之后不能修改文件内容。
+
+### 分而治之（Divide and Conquer）
+
+![hdfsdc](hdfsdc.png)
 
 
 
+![mapdp](mapdp.png)
 
 
 
+![mapdp2](mapdp2.png)
 
 
 
+### NameNode
 
+NameNode 是一个中心服务器，负责管理文件系统的名字空间（namespace）以及客户端对文件的访问。
 
+文件操作，NameNode 负责文件元数据的操作，DataNode 负责处理文件内容的读写请求，跟文件内容相关的数据流不经过 NameNode，只会询问它跟哪个  DataNode 联系，否则 NameNode 会成为系统的瓶颈。
 
+副本存放在哪些 DataNode 上由 NameNode 来控制，根据全局情况作出块放置决定，读取文件时 NameNode 尽量让用户先读取最近的副本，降低带宽消耗和读取时延。
 
+NameNode 全权管理数据块的复制，它周期性地从集群中的每个 DataNode 接收心跳信号和块状态报告（Blockreport）。接收到心跳信号意味着该 DataNode 节点工作正常。块状态报告包含了一个该 DataNode 上所有数据块列表。
 
+### DataNode
 
+一个数据块在 DataNode 以文件存储在磁盘上，包括两个文件，一个是数据本身，一个是元数据，包括数据块的长度，块数据的校验和，以及时间戳。
 
+DataNode 启动后向 NameNode 注册，通过后，周期性（1小时）的向 NameNode 上报所有的块信息。
 
+心跳是每 3 秒一次，心跳返回结果带有 NameNode 给该 DataNode 的命令如复制块数据到另一台机器，或删除某个数据块。如果超过 10 分钟没有收到某个 DataNode 的心跳，则认为该节点不可用。
 
+集群运行中可以安全加入和退出一些机器。
 
+### HDFS 关键运行机制——高可用
 
+一个名字节点和多个数据节点
 
+数据复制（冗余机制）
 
+* 存放的位置（机架感知策略）
+
+故常检测
+
+数据节点
+
+* 心跳包（检查是否宕机）
+* 块报告（安全模式下检测）
+* 数据完整性检测（校验和比较）
+
+名字节点（日志文件，镜像文件）
+
+空间回收机制
+
+![hdfsha](hdfsha.png)
+
+### HDFS 如何写文件？
+
+![writefile](writefile.png)
+
+写一个数据块
+
+![writeblock](writeblock.png)
+
+* 使用 HDFS 提供的客户端开发库 Client，向远程的 NameNode 发起 RPC 请求；
+* NameNode 会检查要创建的文件是否已经存在，创建者是否有权限进行操作，成功则会为文件创建一个记录，否则会让客户端抛出异常；
+* 当客户端开始写入文件的时候，开发库会将文件切分成多个 packets，并在内部以数据队列 "data queue" 的形式管理这些 packets，并向 NameNode 申请新的 blocks，获取用来存储 replicas 的合适的 datanodes 列表，列表的大小根据在 NameNode 中对 replication 的设置而定。
+* 开始以 pipeline （管道）的形式将 packet 写入所有的 replicas 中。开发库把 packet 以流的方式写入第一个 datanode，该 datanode 把该 packet 存储之后，再将其传递给在此 pipeline 中的下一个 datanode，直到最后一个 datanode ，这种写数据的方式呈流水线的形式。
+* 最后一个 datanode 成功存储之后会返回一个 ack packet，在 pipeline 里传递至客户端，在客户端的开发库内部维护着”ack queue“，成功收到 datanode 返回的 ack packet 后会从”ack queue“移除响应的 packet
+* 如果传输过程中，有某个 datanode 出现了故障，那么当前的 pipeline 会被关闭，出现故障的 datanode 会从当前的 pipeline 中移除，剩余的 block 会继续剩下的 datanode 中继续以 pipeline 的形式传输，同时 NameNode 会分配一个新的 datanode，保持 replicas 设定的数量。
+
+### HDFS 如何读文件？
+
+![readfile](readfile.png)
+
+* 使用 HDFS 提供的客户端开发库 Client，向远程的 NameNode 发起 RPC 请求
+* NameNode 会视情况返回文件的部分或者全部 block 列表，对于每个 block，NameNode 都会返回有该 block 拷贝的 DataNode 地址；
+* 客户端开发库 Client 会选取离客户端最近的 DataNode 来读取 block；如果客户端本身就是 DataNode，那么将从本地直接获取数据
+* 读取完当前 block 的数据后，关闭与当前的 DataNode 连接，并为读取下一个 block 寻找最佳的 DataNode
+* 当读完列表的 block 后，且文件读取还没有结束，客户端开发库会继续向 NameNode 获取下一批的 block 列表
+* 读取完一个 block 都会进行 checksum 验证，如果读取 DataNode 时出现错误，客户端会通知 NameNode，然后再从下一个拥有该 block 拷贝的 DataNode 继续读。
+
+### 节点失效是常态
+
+* DataNode 中的磁盘挂了怎么办？
+
+  * DataNode 正常服务
+  * 坏掉的磁盘上的数据尽快通知 NameNode
+
+* DataNode 所在的机器挂了怎么办？
+
+  * 问：NameNode 怎么知道 DataNode 挂掉了？
+  * 答：DataNode 每 3 秒向 NameNode 发送心跳，如果 10 分钟 DataNode 没有向 NameNode 发送心跳，则 NameNode 认为该 DataNode 已经 dead，NameNode 将取出该 DataNode 上对应的 block，对其进行复制。
+
+* NameNode 挂了怎么办？
+
+  * 持久化元数据
+    * 操作日志（edit log）
+      * 记录文件创建，删除，修改文件属性等操作
+    * Fsimage
+      * 包含完整的命名空间
+      * File -> Block 的映射关系
+      * 文件的属性（ACL，quota，修改时间等）
+
+  ![nndead](nndead.png)
+
+* Client 挂了怎么办？
+
+  * 问：Client 所在机器挂了有什么影响？
+  * 答：一致性问题
+
+![clientdead](clientdead.png)
+
+### HDFS 一致性模型
+
+* 文件创建以后，不保证在 NameNode 立即可见，即使文件刷新并存储，文件长度依然可能为 0；
+* 当写入数据超过一个块后，新的 reader 可以看见第一个块，reader 不能看见当前正在写入的块
+* HDFS 提供 sync() 方法强制缓存与数据节点同步，sync() 调用成功后，当前写入数据对所有 reader 可见且一致
+* 调用 sync() 会导致额外的开销
+
+### 副本摆放策略
+
+![replicas](replicas.png)
+
+### 压缩
+
+减少存储所需的磁盘空间
+
+加速数据在网络和磁盘上的传输
+
+| 压缩格式 | Java 实现 | 原生实现 |
+| -------- | --------- | -------- |
+| DEFLATE  | 是        | 是       |
+| gzip     | 是        | 是       |
+| bzip2    | 是        | 否       |
+| LZO      | 否        | 是       |
+
+### SequenceFile
+
+![seqfile](seqfile.png)
+
+数据块 block
+
+* 默认 64M，通常设置为 128M
+
+* 可以在 hdfs-site.xml 中设置
+
+  <property>
+
+  ​	<name>dfs.block.size</name>
+
+  ​	<value>134217728</value>
+
+  </property>
+
+NameNode 参数，在 hdfs-site.xml 中设置
+
+* dfs.name.dir
+
+<property>
+
+​	<name>dfs.name.dir</name>
+
+​	<value>/data0/name,/nfs/name</value>
+
+​	<description>文件存储路径</description>
+
+</property>
+
+* dfs.replication
+
+<property>
+
+​	<name>dfs.replication</name> 
+
+​	<value>3</value> 
+
+​	<description>副本数</description>
+
+</property>
+
+DataNode 参数，在 hdfs-site.xml 中的设置
+
+* dfs.data.dir
+
+  <property>
+
+  ​	<name>dfs.data.dir</name> 
+
+  ​	<value>/data0/hdfs,/data1/hdfs</value> 
+
+  ​	<description>数据存储目录</description>
+
+  </property>
+
+### Hadoop 文件系统
+
+文件系统抽象（org.apache.hadoop）
+
+* fs.FileSystem
+* fs.LocalFileSystem
+* hdfs.DistributedFileSystem 
+* hdfs.HftpFileSystem
+* hdfs.HsftpFileSystem
+* fs.HarFileSystem
+
+### Java 接口
+
+通过 FileSystem API 读取数据
+
+* Path 对象
+  * hdfs://localhost:9000/user/tom/t.txt
+* 获取 FileSystem 实例
+  * publish static FileSystem get(Configuration conf) throws IOException
+  * publish static FileSystem get(URI uri,Configuration conf) throws IOException
+* 获取文件输入流
+  * publish FSDataInputStream open(Path p) throws IOException 
+  * publish abstract FSDataInputStream open(Path p,int bufferSize) throws IOException
+
+## MapReduce
+
+### MapReduce： 大规模数据处理
+
+* 处理海量数据(> 1TB)
+* 上百上千 CPU 实现并行处理
+
+简单地实现以上目的
+
+* 移动计算比移动数据更划算
+
+分而治之
+
+### MapReduce 特性
+
+* 自动实现分布式并行计算
+* 容错
+* 提供状态监控工具
+* 模型抽象简洁，程序员易用
+
+### MapReduce
+
+它由称为 map 和 reduce 的两部分用户程序组成，然后利用框架在计算机集群上面根据需求运行多个程序实例来处理各个子任务，然后再对结果进行归并。
+
+### WordCount 举例
+
+文本前期处理
+
+strl_ist = str.replace('\n', '').lower().split(' ') 
+
+count_dict = {}
+
+如果字典里有该单词则加 1，否则添加入字典
+
+for str in strl_ist:
+ if str in count_dict.keys():
+
+​	count_dict[str] = count_dict[str] + 1
+
+ else:
+
+​	count_dict[str] = 1
+
+![wordcount](wordcount.png)
+
+### MapReduce 的 WordCount
+
+```java
+public class WordCount {
+  public static class TokenizerMapper
+    extends Mapper<Object, Text, Text, IntWritable>{
+    private final static IntWritable one = new IntWritable(1); 
+    private Text word = new Text();
+ 		public void map(Object key, Text value, Context context
+                   ) throws IOException,InterruptedException { 
+      StringTokenizer itr = new StringTokenizer(value.toString()); 
+      while (itr.hasMoreTokens()) {
+        word.set(itr.nextToken());
+        context.write(word, one); 
+      }
+    }
+  }
+  
+  public static class IntSumReducer extends Reducer<Text,IntWritable,Text,IntWritable> {
+   private IntWritable result = new IntWritable();
+   public void reduce(Text key, Iterable<IntWritable> values, Context context
+                     ) throws IOException, InterruptedException {
+     int sum = 0;
+     for (IntWritable val : values) {
+       sum += val.get(); 
+     }
+     result.set(sum);
+     context.write(key, result); 
+   }
+}
+   public static void main(String[] args) throws Exception {
+     Configuration conf = new Configuration(); //得到集群配置参数
+     Job job = Job.getInstance(conf, "WordCount"); //设置到本次的 job 实例中
+     job.setJarByClass(WordCount.class); //指定本次执行的主类是 WordCount
+     job.setMapperClass(TokenizerMapper.class); //指定 map 类
+     job.setCombinerClass(IntSumReducer.class); //指定 combiner 类
+     job.setReducerClass(IntSumReducer.class); //指定 reducer 类
+     job.setOutputKeyClass(Text.class);
+     job.setOutputValueClass(IntWritable.class);
+     FileInputFormat.addInputPath(job, new Path(args[0])); //指定输入数据的路径
+     FileOutputFormat.setOutputPath(job, new Path(args[1])); //指定输出路径
+     System.exit(job.waitForCompletion(true) ? 0 : 1); //指定 job 执行模式，等待任务执行完成后，提交任务的客户端才会退出！
+   } 
+}
+```
+
+![mr1](mr1.png) 
+
+![mr2](mr2.png)
+
+![mr3](mr3.png)
+
+![mr4](mr4.png)
+
+![mr5](mr5.png)
+
+![mr6](mr6.png)
+
+适合 MapReduce 的计算类型
+
+* TopK
+* K-means
+* Bayes
+* SQL
+
+不适合 MapReduce 的计算类型
+
+* Fibonacci
+
+### InputFormat
+
+验证作业的输入的正确性
+
+将输入文件切分成逻辑的 InputSplits，一个 InputSplit 将被分配给一个单独的 Mapper task 提供 RecordReader 的实现，这个 RecordReader 会从 InputSplit 中正确读出一条一条的 K - V 对供 Mapper 使用。
+
+![inputformat](inputformat.png)
+
+### FileInputFormat
+
+得到分片的最小值 minSize 和最大值 maxSize，可以通过设置 mapred.min.split.size 和 mapred.max.split.size 来设置；
+
+对于每个输入文件，计算 max(minSize, min(maxSize, blockSize));
+
+如果 minSize <= blockSize <= maxSize, 则设为 blockSize
+
+分片信息 <file, start,length,hosts>, 通过 hosts 实现 map 本地性
+
+### OutputFormat
+
+OutputFormat 接口决定了在哪里以及怎样持久化作业结果。
+
+默认的 OutputFormat 就是 TextOutputFormat，它是一种以行分隔，包含制表符界定的键值对的文本文件格式。
+
+### Partitioner
+
+什么是 Partitioner
+
+* Mapreduce 通过 Partitioner 对 Key 进行分区，进而把数据按照我们自己的需求来分发。
+
+什么情况下使用 Partitioner
+
+* 如果你需要 key 按照自己的意愿分发，那么你需要这样的组件。
+
+* 框架默认的 HashPartitioner
+
+* 例如：数据内包含省份，而输出要求每个省份输出一个文件
+
+  ```java
+  public int getPartition(K key, V value, int numReduceTasks) {
+    return (key.hashCode() & Integer.MAX_VALUE) % numReduceTasks; 
+  }
+  ```
+
+### 主要调度方法
+
+单队列调度
+
+* 特点：FIFO
+* 优点：简单
+* 缺点：资源利用率低
+
+容量调度（ Capacity Scheduler，Hadoop-0.19.0 ）
+
+* 特点：
+  * 多队列，每个队列分配一定系统容量（Guaranteed Capacity）
+  * 空闲资源可以被动态分配给负载重的队列
+  * 支持作业优先级
+* 作业选择：
+  * 选择队列：资源回收请求队列优先；最多自由空间队列优先
+  * 选择作业：按提交时间、优先级排队；检查用户配额；检查内存
+* 优点：
+  * 支持多作业并行执行，提高资源利用率
+  * 动态调整资源分配，提高作业执行效率
+* 缺点：
+  * 队列设置和队列选择无法自动进行，用户需要了解大量系统信息
+
+公平调度（Fair Scheduler，Hadoop-0.19.0）
+
+* 目标：
+  * 改善小作业的影响时间
+  * 确保生产性作业的服务水平
+* 特点：
+  * 将作业分组——形成作业池（based on a configurable attribute，such as user name，unix group，...）
+  * 给每个作业池分配最小共享资源（Minimum map slots, Minimum reduce slots）
+  * 将多余的资源平均分配给每个作业
+* 作业选择：
+  * 优先调度资源小于最小共享资源的作业
+  * 选择分配资源与所需资源差距最大的作业
+* 优点：
+  * 支持作业分类调度，使不同类型的作业获得不同的资源分配，提高服务质量
+  * 动态调整并行作业数量，充分利用资源
+* 缺点：
+  * 不考虑节点的实际负载状态，导致节点负载实际不均衡
+
+### JobTracker 内部实现
+
+作业控制
+
+* 作业抽象成三层：作业监控层（JIP)，任务控制层（TIP)，任务执行层。
+* 任务可能会被尝试多次执行，每个任务实例被称作 Task Attempt（TA)
+* TA 成功，TIP 会标注该任务成功，所有 TIP 成功，JIP 成功
+
+资源管理
+
+* 根据 TaskTracker 状态信息进行任务分配
+
+### JobTracker 容错
+
+JobTracker 失败，那么未完成 Job 失败；
+
+通过 Job 日志，Job 可部分恢复。
+
+### TaskTracker 容错
+
+超时
+
+* TaskTracker 10 分钟（mapred.tasktracker.expiry.interval）未汇报心跳，则将其从集群移除
+
+灰名单，黑名单
+
+* TaskTracker 上部署性能监控脚本
+* 如果性能表现太差，被 JobTacker 暂停调度
+
+### Task 容错
+
+允许部分 Task 失败
+
+* 允许失败的任务占比，默认 0， Mapred.max.map.failers.percent, mapred.max.reduce.failures.percent
+
+Task 由 TIP 监控，失败任务多次尝试，慢任务启动备份任务
+
+* 每次都是一个 TA （Task Attempt），最大允许尝试次数：mapred.map.max.attempts, mapred.reduce.max.attempts
+
+### Record 容错
+
+跳过导致Task 失败的坏记录
+
+* K,V 超大，导致 OOM，配置最大长度，超出截断 mapred.linercordreader.maxlength
+* 异常数据引发程序 bug，task 重试几次后，自动进入 skip mode，跳过导致失败的记录，mapred.skip.attempts.to.start.skipping
+
+## Yarn
+
+### YARN: Yet Another Resource Negotiator
+
+下一代 MapReduce 框架的名称
+
+不再是一个传统的 MapReduce 框架，甚至与 MapReduce 无关
+
+一个通用的运行框架，用户可以编写自己的计算框架，在该运行环境中运行。
+
+MapReduce 的架构，在 MapReduce 应用程序的启动过程中，最重要的就是要把 MapReduce 程序分发到大数据集群的服务器上，在 hadoop 1 中，这个过程主要是通过 TaskTracker 和 JobTracker 通信来完成。
+
+这种架构方案的主要缺点是，服务器集群资源调度管理和 MapReduce 执行过程耦合在一起，如果想在当前集群中运行其他计算任务，比如 Spark 或者 Storm， 就无法统一使用集群中的资源了。
+
+在 Hadoop 早期的时候，大数据技术就只有 Hadoop 一家，这个缺点并不明显。但随着大数据技术的发展，各种新的计算框架不断出现，我们不可能为每一种计算框架部署一个服务器集群，而且就算能部署新集群，数据还是在原来集群的 HDFS 上。所以我们需要把 MapReduce 的资源管理和计算框架分开，这也是 Hadoop 2 最主要的变化，就是将 Yarn 从 MapReduce 中分离出来，成为一个独立的资源调度框架。
+
+MRv2 最基本的设计思想是将 JobTracker 的两个主要功能，即资源管理和作业管理分成两个独立的进程。
+
+* 在该解决方案中包含两个组件：全局的 ResourceManager（RM) 和与每个应用相关的 ApplicationMaster （AM）
+* 这里的”应用“指一个单独的 MapReduce 作业或者 DAG 作业
+
+### Yarn 架构
+
+![yarn](yarn.png)
+
+Yarn 包括两个部分：
+
+一个是资源管理器（Resource Manager），一个是节点管理器（Node Manager）
+
+这也是 Yarn 的两种主要进程：ResourceManager 进程负责整个集群的资源调度管理，通常部署在独立的服务器上；NodeManager 进程负责具体服务器上的资源和任务管理，在集群的每一台计算服务器上都会启动，基本上跟   HDFS 的 DataNode 进程一起出现。
+
+资源管理器又包含两个主要组件：调度器和应用程序管理器。
+
+调度器其实就是一个资源分配算法，根据应用程序（Client）提交的资源申请核当前服务器集群的资源状况进行资源分配。Yarn 内置了几种资源调度算法，包括 Fair Scheduler、Capacity Scheduler 等，你也可以开发自己的资源调度算法供 Yarn 调用。
+
+Yarn 进行资源分配的单位是容器（Container），每个容器包含了一定量的内存、CPU等计算资源，默认配置下，每个容器包含一个 CPU 核心。容器由 NodeManager 进程启动和管理，NodeManager 进程会监控本节点上容器的运行状况并向 ResourceManager 进程汇报。
+
+应用程序管理器负责应用程序的提交、监控应用程序运行状态等。应用程序启动后需要在集群中运行一个 ApplicationMaster，ApplicationMaster 也需要运行在容器里面。每个应用程序启动后都会先启动自己的 ApplicationMaster，由 ApplicationMaster 根据应用程序的资源需求进一步向 ResourceManager 进程申请容器资源，得到容器以后就会分发自己的应用程序代码到容器上启动，进而开始分布式计算。
+
+### Yarn 的工作流程（MapReduce 为例）
+
+1. 我们向 Yarn 提交应用程序，包括 MapReduce ApplicationMaster、我们的 MapReduce 程序，以及 MapReduce Application 启动命令。
+2. ResourceManager 进程和 NodeManager 进程通信，根据集群资源，为用户程序分配第一个容器，并将 MapReduce ApplicationMaster 分发到这个容器上面，并在容器里面启动 MapReduce ApplicationMaster。
+3. MapReduce ApplicationMaster 启动后立即向 ResourceManager 进程注册，并未自己的应用程序申请容器资源。
+4. MapReduce ApplicationMaster 申请到需要的容器后，立即和相应的 NodeManager 进程通信，将用户 MapReduce 程序分发到 NodeManager 进行所在的服务器，并在容器中运行，运行的就是 Map 或者 Reduce 任务。
+5. Map 或者 Reduce 任务在运行期和 MapReduce ApplicationMaster 通信，汇报自己的运行状态，如果运行结束，MapReduce ApplicationMaster 向 ResourceManager 进程注销并释放所有的容器资源。
+
+## Hive
+
+![hive](hive.png)
+
+![hive1](hive1.png)
+
+![hive2](hive2.png)
+
+```sql
+ hive> CREATE TABLE pokes (foo INT, bar STRING); hive> SHOW TABLES;
+hive> ALTER TABLE pokes ADD COLUMNS (new_col INT); hive> DROP TABLE pokes;
+hive> LOAD DATA LOCAL INPATH './examples/files/kv1.txt' OVERWRITE INTO TABLE pokes;
+hive> SELECT a.foo FROM invites a WHERE a.ds='2008-08-15';
+```
+
+### Hive 架构
+
+![hivearch](hivearch.png)
+
+![hivearch1](hivearch1.png)
+
+### Hive 执行流程
+
+* 操作符（Operator）是 Hive 的最小处理单元
+* 每个操作符处理代表 HDFS 操作或 MR 作业
+* 编译器把 Hive SQL 转换成一组操作符
+
+![hivearch3](hivearch3.png)
+
+### Hive 编译器
+
+![compiler1](compiler1.png)
+
+![complier2](complier2.png)
+
+![compiler3](compiler3.png)
+
+### Example Query (Filter)
+
+Filter status updates containing ‘michael jackson’
+
+* SELECT * FROM status_updates WHERE status LIKE ‘michael jackson’
+
+![example](example.png)
+
+### Example Query (Aggregation)
+
+Figure out total number of status_updates in a given day
+
+* SELECT COUNT(1) FROM status_updates WHERE ds = ’2009-08-01’
+
+### Facebook
+
+![facebook](facebook.png)
+
+### Example Query (multi-group-by)
+
+```sql
+FROM (SELECT a.status, b.school, b.gender FROM status_updates a JOIN profiles b
+ON (a.userid = b.userid and a.ds='2009-03-20' )
+      ) subq1
+INSERT OVERWRITE TABLE gender_summary
+PARTITION(ds='2009-03-20') SELECT subq1.gender, COUNT(1)
+GROUP BY subq1.gender
+INSERT OVERWRITE TABLE school_summary PARTITION(ds='2009-03-20')
+SELECT subq1.school, COUNT(1) GROUP BY subq1.school
+```
+
+![groupby](groupby.png)
+
+## Hive Metastore
+
+### Single User Mode (Default)
+
+![sum](sum.png)
+
+### Multi User Mode
+
+![mum](mum.png)
+
+### Remote Server
+
+![rs](rs.png)
+
+### Hive QL – Join
+
+```sql
+INSERT OVERWRITE TABLE pv_users SELECT pv.pageid, u.age
+FROM page_view pv
+JOIN user u
+ON (pv.userid = u.userid);
+```
+
+### Hive QL – Join in Map Reduce
+
+![join](join.png)
+
+### Join Optimizations
+
+Map Joins
+
+* User specified small tables stored in hash tables on the mapper backed by jdbm
+* No reducer needed
+
+```sql
+INSERT INTO TABLE pv_users
+SELECT /*+ MAPJOIN(pv) */ pv.pageid, u.age FROM page_view pv JOIN user u
+ON (pv.userid = u.userid);
+```
+
+### Hive QL – Map Join
+
+![mapjoin](mapjoin.png)
 
