@@ -376,12 +376,12 @@ PageRank 通过网络浩瀚的超链接关系来确定一个页面的等级。Go
 ![](http://latex.codecogs.com/gif.latex?\frac{\partial J}{\partial \theta_k^{(j)}}=\sum_{i:r(i,j)=1}{\big((\theta^{(j)})^Tx^{(i)}-y^{(i,j)}\big)x_k^{(i)}}+\lambda \theta_k^{(j)})
 
 $$
-PR(A) = \frac {PR(B)}{L(B)} + \frac {PR(C)}{L(C)} + \frac PR(D)/L(D)
+PR(A) = \frac {PR(B)}{L(B)} + \frac {PR(C)}{L(C)} + \frac {PR(D)}{L(D)}
 $$
 
 
 
-![pra](http://latex.codecogs.com/gif.latex?PR(A) = \frac {PR(B)}{L(B)} + \frac {PR(C)}{L(C)} + \frac PR(D)/L(D))
+![pra](http://latex.codecogs.com/gif.latex?PR(A) = \\frac {PR(B)}{L(B)} + \\frac {PR(C)}{L(C)} + \\frac {PR(D)}{L(D)})
 
 
 
