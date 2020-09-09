@@ -373,10 +373,12 @@ PageRank 通过网络浩瀚的超链接关系来确定一个页面的等级。Go
 
 换句话说，根据链出总数平分一个页面的 PR 值。
 
+<img src="http://latex.codecogs.com/gif.latex?\frac{\partial J}{\partial \theta_k^{(j)}}=\sum_{i:r(i,j)=1}{\big((\theta^{(j)})^Tx^{(i)}-y^{(i,j)}\big)x_k^{(i)}}+\lambda \theta_k^{(j)}" />  
 
 $$
 PR(A) = \frac {PR(B)}{L(B)} + \frac {PR(C)}{L(C)} + \frac PR(D)/L(D)
 $$
+
 
 
 
