@@ -381,7 +381,7 @@ $$
 
 
 
-
+![pra](http://latex.codecogs.com/gif.latex?PR(A) = \frac {PR(B)}{L(B)} + \frac {PR(C)}{L(C)} + \frac PR(D)/L(D))
 
 
 
